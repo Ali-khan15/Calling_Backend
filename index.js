@@ -1,163 +1,170 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const cors = require('cors');
 const nodemailer = require('nodemailer');
-
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const { Vonage } = require('@vonage/server-sdk'); // Importing Vonage
+const fs = require('fs'); // For reading the private key
+const bcrypt = require('bcryptjs'); // Import bcrypt for password hashing
+ 
+// Vonage API credentials
+const vonage = new Vonage({
+  apiKey: '070a6680',  // Replace with your actual API key
+  apiSecret: 'a6BKzfjiyhQpdvW7', // Replace with your actual API secret
+  applicationId: '1256c672-f7b3-4e61-a249-195d2df3c5a3', // Add the application ID here
+  privateKey: fs.readFileSync(__dirname + '/private.key') // Point to the location of your private key
+});
+ 
+// Create Express app
 const app = express();
-const PORT = process.env.PORT || 9000;
-
-// Middleware
-app.use(express.json());
 app.use(cors());
-
-// MongoDB Connection
+app.use(bodyParser.json());
+ 
+// MongoDB connection
 mongoose.connect('mongodb+srv://alikhan:Inspiron153000+@calling.oebje.mongodb.net/?retryWrites=true&w=majority&appName=calling', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-})
-  .then(() => console.log('MongoDB connected'))
-  .catch((error) => console.error('MongoDB connection error:', error));
-
-// JWT secret key (hardcoded)
-const JWT_SECRET = 'baf10085b557323bfd5ec1f45a4c070a69259797f3a476602322b860cb423a6c5d5c84a7d09eab0fbbb3adacb0bbe03dd61d4083c1140fd49aaa04bad8e5a256';
-
+}).then(() => {
+  console.log('Connected to MongoDB');
+}).catch(err => console.log(err));
+ 
 // User Schema
-const userSchema = new mongoose.Schema({
-  fullName: { type: String, required: true },
-  phone: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  companyName: { type: String, required: true },
+const UserSchema = new mongoose.Schema({
+  fullName: String,
+  phone: String,
+  email: String,
+  password: String,
+  companyName: String,
 });
-
-const User = mongoose.model('User', userSchema);
-
-// Configure Nodemailer with Gmail
+ 
+const User = mongoose.model('User', UserSchema);
+ 
+// Script Schema
+const ScriptSchema = new mongoose.Schema({
+  script: { type: String, required: true },
+  user: { type: String, required: true },
+  companyName: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+ 
+const Script = mongoose.model('Script', ScriptSchema);
+ 
+// Nodemailer setup
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: 'ak8855105@gmail.com', // Your Gmail address
-      pass: 'zitr nyvl bjxh hqpv', // Your Gmail password or app password if 2FA enabled
-    },
-  });
-  
-  // Register Route
+  service: 'gmail',
+  auth: {
+    user: 'ak8855105@gmail.com', // your Gmail
+    pass: 'zitr nyvl bjxh hqpv', // your Gmail app password
+  },
+});
+ 
+// Signup route
 app.post('/signup', async (req, res) => {
-    const { fullName, phone, email, password, companyName } = req.body;
-  
-    try {
-      // Check if user already exists
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        return res.status(400).json({ message: 'User already exists' });
-      }
-  
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-  
-      // Create new user
-      const newUser = new User({
-        fullName,
-        phone,
-        email,
-        password: hashedPassword,
-        companyName,
-      });
-  
-      await newUser.save();
-  
-      // Generate token
-      const token = jwt.sign({ userId: newUser._id }, JWT_SECRET, { expiresIn: '1h' });
-  
-      // Send a welcome email to the user
-      const mailOptions = {
-        from: 'ak8855105@gmail.com', // sender address
-        to: email, // list of receivers
-        subject: 'Welcome to Our Platform', // Subject line
-        text: `Hello ${fullName},\n\nThank you for signing up on our platform. We are excited to have you onboard!\n\nBest regards,\nThe Team`, // plain text body
-      };
-  
-      // Send email
-      transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-          console.error('Error sending email:', error);
-          return res.status(500).json({ message: 'User created, but email failed to send' });
-        } else {
-          console.log('Email sent: ' + info.response);
-          return res.status(201).json({ message: 'Signup successful, email sent!', token });
-        }
-      });
-    } catch (error) {
-      console.error('Error during signup:', error);
-      res.status(500).json({ message: 'Server error' });
+  const { fullName, phone, email, password, companyName } = req.body;
+ 
+  try {
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).send({ message: 'User already exists with this email' });
     }
-  });
-
-
-
-  app.use('/', (req, res) => {
-    res.json({message :'Hello World'});
-  });
-  
-// Login Route
+ 
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+ 
+    // Save user to the database
+    const newUser = new User({ fullName, phone, email, password: hashedPassword, companyName });
+    await newUser.save();
+ 
+    // Send welcome email
+    const mailOptions = {
+      from: 'ak8855105@gmail.com',
+      to: email,
+      subject: 'Welcome to Calling Web!',
+      text: `Hi ${fullName},\n\nThank you for signing up at Calling Web. We are excited to have you onboard!\n\nBest Regards,\nCalling Web Team`,
+    };
+ 
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log(error);
+        return res.status(500).send({ message: 'Error sending email' });
+      } else {
+        console.log('Email sent: ' + info.response);
+        res.status(201).send({ message: 'Signup successful and email sent', user: newUser });
+      }
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send({ message: 'Error signing up user' });
+  }
+});
+ 
+// Login route
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-
+ 
   try {
-    // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ message: 'User with this email not found' });
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
-
-    // Check password
+ 
+    // Compare the hashed password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Incorrect password' });
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
-
-    // Generate token
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
-
-    res.status(200).json({ message: 'Login successful', token });
-  } catch (error) {
-    console.error('Error during login:', error);
-    res.status(500).json({ message: 'Server error' });
+ 
+    res.status(200).json({ message: 'Login successful', user });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send({ message: 'Error logging in' });
   }
 });
-
-const authenticate = (req, res, next) => {
-  const token = req.headers['authorization'];
-  if (!token || !token.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Access denied, no token provided' });
-  }
-
+ 
+// Route to submit the script
+app.post('/submit-script', async (req, res) => {
+  const { script, user, companyName } = req.body;
+ 
   try {
-    const decoded = jwt.verify(token.split(' ')[1], JWT_SECRET); // Split 'Bearer ' and get the token part
-    req.user = decoded;
-    next();
-  } catch (error) {
-    return res.status(400).json({ message: 'Invalid token' });
-  }
-};
-
-// Get User Info Route
-app.get('/user', authenticate, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    res.status(200).json({ fullName: user.fullName });
-  } catch (error) {
-    console.error('Error fetching user info:', error);
-    res.status(500).json({ message: 'Server error' });
+    const newScript = new Script({ script, user, companyName });
+    await newScript.save();
+ 
+    res.status(201).json({ message: 'Script saved successfully!' });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send({ message: 'Error saving script' });
   }
 });
-
-// Start server
+ 
+// Route to call users using Vonage API
+app.post('/call-users', (req, res) => {
+  const { numbers, script } = req.body;
+ 
+  numbers.forEach((number) => {
+    vonage.voice.createOutboundCall({
+      to: [{ type: 'phone', number }],
+      from: { type: 'phone', number: '+923355504440' }, // Replace with your Vonage registered number
+      ncco: [
+        {
+          action: 'talk',
+          text: script,
+        }
+      ]
+    }, (err, responseData) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).send({ message: 'Error calling user' });
+      } else {
+        console.log(responseData);
+      }
+    });
+  });
+ 
+  res.status(200).send({ message: 'Calls initiated!' });
+});
+ 
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
