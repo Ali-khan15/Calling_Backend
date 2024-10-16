@@ -163,6 +163,10 @@ app.post('/call-users', (req, res) => {
  
   res.status(200).send({ message: 'Calls initiated!' });
 });
+
+app.get('/', (req, res) => {
+  res.send('Hello World');
+});
  
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
